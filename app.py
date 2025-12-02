@@ -1,9 +1,29 @@
 import streamlit as st
+import subprocess
+import sys
+import time
+
+# --- 🛠️ ส่วนบังคับติดตั้ง Library (Force Install) ---
+# โค้ดส่วนนี้จะทำงานถ้า Server หา 'streamlit-drawable-canvas' ไม่เจอ
+try:
+    from streamlit_drawable_canvas import st_canvas
+except ImportError:
+    # แสดงข้อความบอก User ว่ากำลังแก้ปัญหา
+    placeholder = st.empty()
+    placeholder.warning("⚠️ กำลังติดตั้งเครื่องมือวาดภาพ... (รอสักครู่ ระบบจะรีเฟรชเอง)")
+    
+    # สั่ง PIP Install ผ่าน Python โดยตรง
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit-drawable-canvas"])
+    
+    # รอแป๊บนึงแล้วสั่ง Rerun หน้าเว็บใหม่
+    time.sleep(2)
+    st.rerun()
+
+# --- Imports อื่นๆ ปกติ ---
 import cv2
 import numpy as np
 from PIL import Image
 import io
-from streamlit_drawable_canvas import st_canvas
 
 # 1. ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="Gemini Watermark Remover", page_icon="✨", layout="centered")
@@ -94,23 +114,19 @@ if uploaded_file is not None:
     display_image, scale_factor = resize_image_for_display(original_image_pil)
     d_w, d_h = display_image.size
     
-    # ใช้ session state เพื่อจำค่าตำแหน่ง (เมื่อมีการปรับ Slider จะได้ไม่เด้งกลับที่เดิม)
+    # ใช้ session state เพื่อจำค่าตำแหน่ง
     if 'box_x' not in st.session_state:
-        st.session_state['box_x'] = d_w - 85 # ค่าเริ่มต้น (มุมขวา)
+        st.session_state['box_x'] = d_w - 85 
     if 'box_y' not in st.session_state:
-        st.session_state['box_y'] = d_h - 85 # ค่าเริ่มต้น (มุมล่าง)
+        st.session_state['box_y'] = d_h - 85 
     
     # 2. หลอดปรับขนาด (Slider)
     st.write("")
-    # คำนวณค่า Default scale
-    default_scale = int(d_w * 0.1) 
-    if default_scale < 50: default_scale = 50
     
     # Slider ปรับขนาด
     box_size = st.slider("ปรับขนาดพื้นที่ลบ", 30, 200, 75)
     
     # 3. สร้าง JSON สำหรับ Canvas
-    # เทคนิค: lockScalingX/Y = True จะทำให้ user ย่อขยายเองไม่ได้ (ต้องใช้ Slider เท่านั้น)
     initial_drawing = {
         "version": "4.4.0",
         "objects": [
@@ -124,10 +140,10 @@ if uploaded_file is not None:
                 "stroke": "#ffbb4e",
                 "strokeWidth": 2,
                 "angle": 0,
-                "hasControls": False,   # ซ่อนจุดจับย่อขยาย
-                "lockScalingX": True,   # ห้ามย่อขยายแนวนอน
-                "lockScalingY": True,   # ห้ามย่อขยายแนวตั้ง
-                "lockRotation": True    # ห้ามหมุน
+                "hasControls": False,   
+                "lockScalingX": True,   
+                "lockScalingY": True,   
+                "lockRotation": True    
             }
         ]
     }
@@ -135,71 +151,68 @@ if uploaded_file is not None:
     st.write("👇 **ลากกรอบแดงไปวางทับลายน้ำ (ปรับขนาดที่หลอดด้านบน)**")
     
     # 4. Canvas (Interactive)
-    # key ต้องเปลี่ยนตาม box_size เพื่อให้มัน Redraw ขนาดใหม่ทันทีที่เลื่อน Slider
-    canvas_result = st_canvas(
-        fill_color="rgba(255, 0, 0, 0.3)",
-        stroke_width=2,
-        stroke_color="#ffbb4e",
-        background_image=display_image,
-        update_streamlit=True,
-        height=d_h,
-        width=d_w,
-        drawing_mode="transform",
-        initial_drawing=initial_drawing,
-        key=f"canvas_{box_size}_{uploaded_file.name}", # Trick: เปลี่ยน key เพื่อบังคับอัปเดตขนาด
-    )
+    # เราต้องเช็คว่า import st_canvas มาได้จริงไหมอีกรอบตรงนี้เพื่อความชัวร์
+    if 'st_canvas' in globals():
+        canvas_result = st_canvas(
+            fill_color="rgba(255, 0, 0, 0.3)",
+            stroke_width=2,
+            stroke_color="#ffbb4e",
+            background_image=display_image,
+            update_streamlit=True,
+            height=d_h,
+            width=d_w,
+            drawing_mode="transform",
+            initial_drawing=initial_drawing,
+            key=f"canvas_{box_size}_{uploaded_file.name}", 
+        )
 
-    # 5. Logic การลบและอัปเดตตำแหน่ง
-    if canvas_result.json_data is not None:
-        objects = canvas_result.json_data["objects"]
-        
-        if len(objects) > 0:
-            obj = objects[0]
+        # 5. Logic การลบและอัปเดตตำแหน่ง
+        if canvas_result.json_data is not None:
+            objects = canvas_result.json_data["objects"]
             
-            # อัปเดตตำแหน่งล่าสุดลง Session State (เพื่อให้ลากแล้วจำตำแหน่งได้)
-            st.session_state['box_x'] = obj["left"]
-            st.session_state['box_y'] = obj["top"]
-            
-            # คำนวณพิกัดจริงบนภาพ Original (Unscaled)
-            real_left = int(obj["left"] / scale_factor)
-            real_top = int(obj["top"] / scale_factor)
-            real_size_w = int(box_size / scale_factor)
-            real_size_h = int(box_size / scale_factor)
-
-            # แปลงภาพเพื่อประมวลผล
-            img_array = np.array(original_image_pil)
-            
-            # สร้าง Mask
-            mask = np.zeros(img_array.shape[:2], dtype=np.uint8)
-            cv2.rectangle(mask, 
-                          (real_left, real_top), 
-                          (real_left + real_size_w, real_top + real_size_h), 
-                          255, -1)
-            
-            # เบลอ Mask (เพิ่มความเนียน)
-            mask_blurred = cv2.GaussianBlur(mask, (35, 35), 0)
-
-            # ลบด้วย AI (Inpaint)
-            with st.spinner('⚡ กำลังลบ...'):
-                result = cv2.inpaint(img_array, mask_blurred, 10, cv2.INPAINT_NS)
-
-            # แสดงผล
-            st.write("---")
-            st.subheader("✨ ผลลัพธ์")
-            st.image(result, use_column_width=True)
-
-            # ปุ่มดาวน์โหลด
-            st.write("")
-            col_d1, col_d2, col_d3 = st.columns([1,2,1])
-            with col_d2:
-                result_pil = Image.fromarray(result)
-                buf = io.BytesIO()
-                result_pil.save(buf, format="PNG")
-                byte_im = buf.getvalue()
+            if len(objects) > 0:
+                obj = objects[0]
                 
-                st.download_button(
-                    label="📥 ดาวน์โหลดรูปภาพ HD",
-                    data=byte_im,
-                    file_name="gemini_cleaned_hybrid.png",
-                    mime="image/png"
-                )
+                # อัปเดตตำแหน่งล่าสุดลง Session State
+                st.session_state['box_x'] = obj["left"]
+                st.session_state['box_y'] = obj["top"]
+                
+                # คำนวณพิกัดจริง
+                real_left = int(obj["left"] / scale_factor)
+                real_top = int(obj["top"] / scale_factor)
+                real_size_w = int(box_size / scale_factor)
+                real_size_h = int(box_size / scale_factor)
+
+                img_array = np.array(original_image_pil)
+                
+                mask = np.zeros(img_array.shape[:2], dtype=np.uint8)
+                cv2.rectangle(mask, 
+                              (real_left, real_top), 
+                              (real_left + real_size_w, real_top + real_size_h), 
+                              255, -1)
+                
+                mask_blurred = cv2.GaussianBlur(mask, (35, 35), 0)
+
+                with st.spinner('⚡ กำลังลบ...'):
+                    result = cv2.inpaint(img_array, mask_blurred, 10, cv2.INPAINT_NS)
+
+                st.write("---")
+                st.subheader("✨ ผลลัพธ์")
+                st.image(result, use_column_width=True)
+
+                st.write("")
+                col_d1, col_d2, col_d3 = st.columns([1,2,1])
+                with col_d2:
+                    result_pil = Image.fromarray(result)
+                    buf = io.BytesIO()
+                    result_pil.save(buf, format="PNG")
+                    byte_im = buf.getvalue()
+                    
+                    st.download_button(
+                        label="📥 ดาวน์โหลดรูปภาพ HD",
+                        data=byte_im,
+                        file_name="gemini_cleaned_hybrid.png",
+                        mime="image/png"
+                    )
+    else:
+        st.error("เกิดข้อผิดพลาดในการโหลด Canvas กรุณารีเฟรชหน้าจอ")
