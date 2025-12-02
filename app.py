@@ -7,63 +7,73 @@ import io
 # 1. ตั้งค่าหน้าเว็บ
 st.set_page_config(page_title="Gemini Watermark Remover", page_icon="✨", layout="centered")
 
-# --- 2. CSS (ชุดเดิมที่สวยแล้ว) ---
+# --- 2. CSS ชุดใหม่ (แก้สี, แก้ตัวอักษรทับ, ปรับปุ่มส้ม) ---
 st.markdown(
     """
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap');
 
-    .stApp > header + div, .stApp {
-        background-color: #2596be !important;
+    /* --- Main Background Colors (#253240) --- */
+    .stApp > header + div, .stApp, header[data-testid="stHeader"] {
+        background-color: #253240 !important;
     }
     div[data-testid="stAppViewContainer"] {
-        background-color: #2596be !important;
+        background-color: #253240 !important;
     }
-    h1, h2, h3, h4, h5, h6, p, div, label, span, button, .stMarkdown, .stExpander {
+
+    /* --- Typography (Kanit & White Text) --- */
+    /* เลือกเฉพาะ Element ที่จำเป็น เพื่อป้องกัน Layout พังแล้วตัวหนังสือทับกัน */
+    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stExpander {
         color: white !important;
         font-family: 'Kanit', sans-serif !important;
     }
-    header[data-testid="stHeader"] {
-        background-color: #2596be !important;
-    }
+
+    /* --- File Uploader Styling (Orange Accent) --- */
     [data-testid='stFileUploader'] {
-        background-color: rgba(255, 255, 255, 0.15);
-        border: 2px dashed rgba(255, 255, 255, 0.5);
+        background-color: rgba(255, 255, 255, 0.05); /* พื้นหลังจางๆ */
+        border: 2px dashed #ffbb4e; /* ขอบสีส้ม */
         border-radius: 15px;
-        padding: 30px;
+        padding: 25px;
     }
     section[data-testid="stFileUploaderDropzone"] > div > span {
-         color: white !important;
+         color: #ffbb4e !important; /* ตัวหนังสือ "Drag and drop..." สีส้ม */
          font-weight: bold;
     }
     [data-testid="stFileUploader"] svg {
-        display: none;
+        fill: #ffbb4e !important; /* เปลี่ยนสีไอคอนเป็นส้ม */
     }
+    
+    /* --- Download Button Styling (Orange #ffbb4e) --- */
     .stDownloadButton > button {
-        background-color: white !important;
-        color: #2596be !important;
+        background-color: #ffbb4e !important;
+        color: #253240 !important; /* ตัวหนังสือสีเข้มบนปุ่มส้ม */
         border: none;
         border-radius: 25px;
-        padding: 15px 30px;
+        padding: 15px 35px;
         font-size: 1.1rem;
         font-weight: bold;
         font-family: 'Kanit', sans-serif !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
         transition: all 0.3s ease;
     }
     .stDownloadButton > button:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 8px rgba(0,0,0,0.15);
-        background-color: #f0f0f0 !important;
+        box-shadow: 0 8px 12px rgba(255, 187, 78, 0.3); /* เงาสีส้ม */
+        background-color: #ffc978 !important; /* ส้มอ่อนลงนิดนึงตอน Hover */
     }
-    
-    /* ปรับแต่ง Expander ให้ดูกลมกลืน */
+
+    /* --- Expander Styling --- */
     .streamlit-expanderHeader {
-        background-color: rgba(0,0,0,0.1) !important;
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1);
         border-radius: 10px !important;
-        color: white !important;
+        color: #ffbb4e !important; /* หัวข้อ Expander สีส้ม */
     }
-    
+    /* แก้ไข slider สีส้ม */
+    .stSlider > div > div > div > div {
+        background-color: #ffbb4e !important;
+    }
+
     footer {visibility: hidden;}
     </style>
     """,
@@ -86,19 +96,14 @@ if uploaded_file is not None:
     img_array = np.array(image)
     h, w = img_array.shape[:2]
 
-    # --- 🧠 Logic ใหม่: คำนวณขนาดแบบ Adaptive ---
-    # ปกติลายน้ำ Gemini จะกินพื้นที่ประมาณ 6-7% ของความกว้างรูป
-    # เราตั้งค่าเริ่มต้นให้มันคำนวณเองเลย
+    # --- Smart Scale Logic ---
     default_mask_scale = int(w * 0.065) 
-    
-    # ป้องกันไม่ให้เล็กเกินไป (ถ้ารูปเล็กมาก) หรือใหญ่เกินไป
     if default_mask_scale < 50: default_mask_scale = 50
     if default_mask_scale > 200: default_mask_scale = 200
 
-    # --- ซ่อนการปรับแต่งไว้ใน Expander (ไม่รกตา แต่แก้ได้ถ้าพลาด) ---
+    # --- Expander ตั้งค่า (แก้ไข UI แล้ว) ---
     with st.expander("⚙️ ตั้งค่าเพิ่มเติม (กดเมื่อลบไม่หมด)"):
-        st.write("ปกติไม่ต้องปรับครับ ระบบคำนวณให้แล้ว แต่ถ้ารูปไหนลบไม่หมด ให้เพิ่มขนาดตรงนี้")
-        # Slider นี้จะเริ่มที่ค่าที่คำนวณได้อัตโนมัติ
+        st.write("ปรับขนาดหากลบไม่หมด หรือกินเนื้อที่มากเกินไป")
         mask_size = st.slider("ขนาดพื้นที่ลบ", 40, 300, default_mask_scale)
         offset_adj = st.slider("ขยับตำแหน่ง (เข้า-ออก)", 0, 50, 10)
 
@@ -107,31 +112,35 @@ if uploaded_file is not None:
     offset_y = offset_adj
     
     mask = np.zeros(img_array.shape[:2], dtype=np.uint8)
-    
     start_x = w - mask_size - offset_x
     start_y = h - mask_size - offset_y
     end_x = w - offset_x
     end_y = h - offset_y
     
-    # วาดและเบลอ Mask
     if start_x > 0 and start_y > 0:
+        # สร้าง Mask
         cv2.rectangle(mask, (start_x, start_y), (end_x, end_y), 255, -1)
-        # เพิ่มความฟุ้งให้มากขึ้นอีกนิด (31,31) เพื่อลดรอยเหลี่ยม
-        mask_blurred = cv2.GaussianBlur(mask, (31, 31), 15)
+        # เบลอ Mask (เพิ่มความฟุ้งอีกนิด)
+        mask_blurred = cv2.GaussianBlur(mask, (35, 35), 0)
 
-        with st.spinner('⚡ กำลังคำนวณและลบ...'):
-            # ใช้ Inpaint รัศมีกว้างขึ้นนิดนึง (5->7) เพื่อกินเนื้อที่รอบๆ มาถมให้เนียน
-            result = cv2.inpaint(img_array, mask_blurred, 7, cv2.INPAINT_TELEA)
+        with st.spinner('⚡ กำลังใช้พลัง AI ลบลายน้ำ...'):
+            # --- เปลี่ยนอัลกอริทึม! ---
+            # ใช้ INPAINT_NS (Navier-Stokes) แทน TELEA 
+            # และเพิ่ม Radius เป็น 10 เพื่อให้กินวงกว้างขึ้น เนียนขึ้นกับพื้นผิวหมอก
+            result = cv2.inpaint(img_array, mask_blurred, 10, cv2.INPAINT_NS)
 
-        # --- แสดงผล ---
+        # --- แสดงผลแบบ Before / After (แก้แล้ว) ---
         st.write("---")
+        st.subheader("📊 เปรียบเทียบผลลัพธ์")
         
-        # ใช้ columns จัดกลางให้ดูดี
-        c1, c2, c3 = st.columns([1, 10, 1])
-        with c2:
-            st.image(result, caption="✨ ผลลัพธ์ (Cleaned)", use_column_width=True)
+        col_before, col_after = st.columns(2)
+        with col_before:
+            st.image(image, caption="Before (ต้นฉบับ)", use_column_width=True)
+        with col_after:
+            st.image(result, caption="After (ลบแล้ว ✨)", use_column_width=True)
 
-        # ปุ่มโหลด
+        # ปุ่มดาวน์โหลดสีส้ม
+        st.write("")
         st.write("")
         col_d1, col_d2, col_d3 = st.columns([1,2,1])
         with col_d2:
@@ -141,9 +150,9 @@ if uploaded_file is not None:
             byte_im = buf.getvalue()
             
             st.download_button(
-                label="📥 ดาวน์โหลดรูปภาพ",
+                label="📥 ดาวน์โหลดรูปภาพ HD",
                 data=byte_im,
-                file_name="gemini_cleaned_smart.png",
+                file_name="gemini_cleaned_pro.png",
                 mime="image/png"
             )
     else:
