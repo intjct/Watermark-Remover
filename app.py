@@ -1,25 +1,4 @@
 import streamlit as st
-import subprocess
-import sys
-import time
-
-# --- 🛠️ ส่วนบังคับติดตั้ง Library (Force Install) ---
-# โค้ดส่วนนี้จะทำงานถ้า Server หา 'streamlit-drawable-canvas' ไม่เจอ
-try:
-    from streamlit_drawable_canvas import st_canvas
-except ImportError:
-    # แสดงข้อความบอก User ว่ากำลังแก้ปัญหา
-    placeholder = st.empty()
-    placeholder.warning("⚠️ กำลังติดตั้งเครื่องมือวาดภาพ... (รอสักครู่ ระบบจะรีเฟรชเอง)")
-    
-    # สั่ง PIP Install ผ่าน Python โดยตรง
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "streamlit-drawable-canvas"])
-    
-    # รอแป๊บนึงแล้วสั่ง Rerun หน้าเว็บใหม่
-    time.sleep(2)
-    st.rerun()
-
-# --- Imports อื่นๆ ปกติ ---
 import cv2
 import numpy as np
 from PIL import Image
@@ -34,16 +13,21 @@ st.markdown(
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap');
 
+    /* Background Colors */
     .stApp > header + div, .stApp, header[data-testid="stHeader"] {
         background-color: #253240 !important;
     }
     div[data-testid="stAppViewContainer"] {
         background-color: #253240 !important;
     }
-    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stExpander {
+
+    /* Typography (Kanit & White) */
+    h1, h2, h3, h4, h5, h6, p, label, .stMarkdown, .stExpander, div[data-testid="stCaptionContainer"] {
         color: white !important;
         font-family: 'Kanit', sans-serif !important;
     }
+
+    /* File Uploader */
     [data-testid='stFileUploader'] {
         background-color: rgba(255, 255, 255, 0.05);
         border: 2px dashed #ffbb4e;
@@ -63,12 +47,12 @@ st.markdown(
         color: white !important;
     }
     
-    /* Slider Styling */
+    /* Sliders styling */
     .stSlider > div > div > div > div {
         background-color: #ffbb4e !important;
     }
     
-    /* Button Styling */
+    /* Download Button */
     .stDownloadButton > button {
         background-color: #ffbb4e !important;
         color: #253240 !important;
@@ -84,135 +68,101 @@ st.markdown(
         transform: translateY(-2px);
         background-color: #ffc978 !important;
     }
+
     footer {visibility: hidden;}
     </style>
     """,
     unsafe_allow_html=True
 )
 
-# --- Helper Function: Resize for Display ---
-def resize_image_for_display(image, max_width=700):
-    w, h = image.size
-    if w > max_width:
-        ratio = max_width / w
-        new_h = int(h * ratio)
-        return image.resize((max_width, new_h)), ratio
-    return image, 1.0
-
-# --- Main Logic ---
+# --- เนื้อหาหลัก ---
 
 col_head1, col_head2, col_head3 = st.columns([1,2,1])
 with col_head2:
     st.title("✨ ลบลายน้ำ Gemini")
-    st.write("ลากกรอบเพื่อย้าย + เลื่อนหลอดเพื่อปรับขนาด")
+    st.write("ปรับตำแหน่งด้วยหลอดเลื่อน (ชัวร์สุด!)")
 
 uploaded_file = st.file_uploader("วางรูปภาพที่นี่ (JPG/PNG)", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    # 1. จัดการรูปภาพ
-    original_image_pil = Image.open(uploaded_file).convert("RGB")
-    display_image, scale_factor = resize_image_for_display(original_image_pil)
-    d_w, d_h = display_image.size
-    
-    # ใช้ session state เพื่อจำค่าตำแหน่ง
-    if 'box_x' not in st.session_state:
-        st.session_state['box_x'] = d_w - 85 
-    if 'box_y' not in st.session_state:
-        st.session_state['box_y'] = d_h - 85 
-    
-    # 2. หลอดปรับขนาด (Slider)
-    st.write("")
-    
-    # Slider ปรับขนาด
-    box_size = st.slider("ปรับขนาดพื้นที่ลบ", 30, 200, 75)
-    
-    # 3. สร้าง JSON สำหรับ Canvas
-    initial_drawing = {
-        "version": "4.4.0",
-        "objects": [
-            {
-                "type": "rect",
-                "left": st.session_state['box_x'],
-                "top": st.session_state['box_y'],
-                "width": box_size,
-                "height": box_size,
-                "fill": "rgba(255, 0, 0, 0.3)",
-                "stroke": "#ffbb4e",
-                "strokeWidth": 2,
-                "angle": 0,
-                "hasControls": False,   
-                "lockScalingX": True,   
-                "lockScalingY": True,   
-                "lockRotation": True    
-            }
-        ]
-    }
+    # เตรียมภาพ
+    image = Image.open(uploaded_file).convert("RGB")
+    img_array = np.array(image)
+    h, w = img_array.shape[:2]
 
-    st.write("👇 **ลากกรอบแดงไปวางทับลายน้ำ (ปรับขนาดที่หลอดด้านบน)**")
+    # --- Smart Scale Logic (คำนวณค่าเริ่มต้นให้) ---
+    default_mask_scale = int(w * 0.07) # ประมาณ 7% ของความกว้างรูป
+    if default_mask_scale < 50: default_mask_scale = 50
+    if default_mask_scale > 200: default_mask_scale = 200
     
-    # 4. Canvas (Interactive)
-    # เราต้องเช็คว่า import st_canvas มาได้จริงไหมอีกรอบตรงนี้เพื่อความชัวร์
-    if 'st_canvas' in globals():
-        canvas_result = st_canvas(
-            fill_color="rgba(255, 0, 0, 0.3)",
-            stroke_width=2,
-            stroke_color="#ffbb4e",
-            background_image=display_image,
-            update_streamlit=True,
-            height=d_h,
-            width=d_w,
-            drawing_mode="transform",
-            initial_drawing=initial_drawing,
-            key=f"canvas_{box_size}_{uploaded_file.name}", 
-        )
+    # --- ส่วนควบคุม (Controllers) ---
+    st.write("---")
+    st.markdown("### 🎛️ ปรับแต่งพื้นที่ลบ")
+    
+    # 1. ปรับขนาด
+    mask_size = st.slider("📐 ขนาดกล่องสี่เหลี่ยม", 30, 300, default_mask_scale)
+    
+    # 2. ปรับตำแหน่ง (แยก 2 หลอดตามคำขอ)
+    col_ctrl1, col_ctrl2 = st.columns(2)
+    
+    with col_ctrl1:
+        # แนวนอน (X Axis)
+        # 0 = ชิดขวาสุด, ค่ามาก = เลื่อนไปทางซ้าย
+        offset_x = st.slider("↔️ แนวนอน (ซ้าย - ขวา)", 0, 150, 10, help="เลื่อนกรอบไปทางซ้าย")
+        
+    with col_ctrl2:
+        # แนวตั้ง (Y Axis)
+        # 0 = ชิดล่างสุด, ค่ามาก = เลื่อนขึ้นบน
+        offset_y = st.slider("↕️ แนวตั้ง (ขึ้น - ลง)", 0, 150, 10, help="เลื่อนกรอบขึ้นข้างบน")
 
-        # 5. Logic การลบและอัปเดตตำแหน่ง
-        if canvas_result.json_data is not None:
-            objects = canvas_result.json_data["objects"]
+    # --- คำนวณตำแหน่ง (Calculations) ---
+    # สูตร: เริ่มจากมุมขวาล่าง แล้วลบด้วยค่า offset ที่เราปรับ
+    start_x = w - mask_size - offset_x
+    start_y = h - mask_size - offset_y
+    end_x = w - offset_x
+    end_y = h - offset_y
+    
+    # --- สร้าง Mask และ ประมวลผล ---
+    if start_x > 0 and start_y > 0:
+        # 1. สร้าง Mask
+        mask = np.zeros(img_array.shape[:2], dtype=np.uint8)
+        cv2.rectangle(mask, (start_x, start_y), (end_x, end_y), 255, -1)
+        
+        # 2. เบลอ Mask (เทคนิคขอบฟุ้ง)
+        mask_blurred = cv2.GaussianBlur(mask, (35, 35), 0)
+
+        # 3. ลบด้วย AI (Inpaint NS)
+        result = cv2.inpaint(img_array, mask_blurred, 10, cv2.INPAINT_NS)
+
+        # --- ส่วนแสดงผล (Preview & Result) ---
+        st.write("---")
+        st.subheader("👀 ตรวจสอบและดาวน์โหลด")
+        
+        # สร้างภาพ Preview ที่มีกรอบแดง
+        preview_img = img_array.copy()
+        # วาดกรอบแดง (Red Box)
+        cv2.rectangle(preview_img, (start_x, start_y), (end_x, end_y), (255, 50, 50), 3)
+
+        col_before, col_after = st.columns(2)
+        with col_before:
+            st.image(preview_img, caption="พื้นที่ลบ (กรอบแดง)", use_column_width=True)
+        with col_after:
+            st.image(result, caption="ผลลัพธ์ (ลบแล้ว ✨)", use_column_width=True)
+
+        # ปุ่มดาวน์โหลด
+        st.write("")
+        col_d1, col_d2, col_d3 = st.columns([1,2,1])
+        with col_d2:
+            result_pil = Image.fromarray(result)
+            buf = io.BytesIO()
+            result_pil.save(buf, format="PNG")
+            byte_im = buf.getvalue()
             
-            if len(objects) > 0:
-                obj = objects[0]
-                
-                # อัปเดตตำแหน่งล่าสุดลง Session State
-                st.session_state['box_x'] = obj["left"]
-                st.session_state['box_y'] = obj["top"]
-                
-                # คำนวณพิกัดจริง
-                real_left = int(obj["left"] / scale_factor)
-                real_top = int(obj["top"] / scale_factor)
-                real_size_w = int(box_size / scale_factor)
-                real_size_h = int(box_size / scale_factor)
-
-                img_array = np.array(original_image_pil)
-                
-                mask = np.zeros(img_array.shape[:2], dtype=np.uint8)
-                cv2.rectangle(mask, 
-                              (real_left, real_top), 
-                              (real_left + real_size_w, real_top + real_size_h), 
-                              255, -1)
-                
-                mask_blurred = cv2.GaussianBlur(mask, (35, 35), 0)
-
-                with st.spinner('⚡ กำลังลบ...'):
-                    result = cv2.inpaint(img_array, mask_blurred, 10, cv2.INPAINT_NS)
-
-                st.write("---")
-                st.subheader("✨ ผลลัพธ์")
-                st.image(result, use_column_width=True)
-
-                st.write("")
-                col_d1, col_d2, col_d3 = st.columns([1,2,1])
-                with col_d2:
-                    result_pil = Image.fromarray(result)
-                    buf = io.BytesIO()
-                    result_pil.save(buf, format="PNG")
-                    byte_im = buf.getvalue()
-                    
-                    st.download_button(
-                        label="📥 ดาวน์โหลดรูปภาพ HD",
-                        data=byte_im,
-                        file_name="gemini_cleaned_hybrid.png",
-                        mime="image/png"
-                    )
+            st.download_button(
+                label="📥 ดาวน์โหลดรูปภาพ HD",
+                data=byte_im,
+                file_name="gemini_cleaned_final.png",
+                mime="image/png"
+            )
     else:
-        st.error("เกิดข้อผิดพลาดในการโหลด Canvas กรุณารีเฟรชหน้าจอ")
+        st.error("⚠️ พื้นที่ลบหลุดออกนอกกรอบภาพ กรุณาปรับค่าลดลง")
